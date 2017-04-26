@@ -31,6 +31,8 @@ int encode(uint32_t point, CodeUnits *units)
 		units->code[i] = code_128 | ((point >> (6 * (units->length - i - 1))) & code_63);
 	}
 
+	print_BIT(units);
+
 	return 0;
 }
 
@@ -59,35 +61,35 @@ uint32_t decode(const CodeUnits *units)
 
 int read_next_code_unit(FILE *in, CodeUnits *units)
 {
-	while (!feof(in)) {
-		fread(&units->code[0], 1, 1, in);
-		if (units->code[0] <= 0x7f) {
-			units->length = 1;
-		} else if (units->code[0] <= 0xdf) {
-			units->length = 2;
-		} else if (units->code[0] <= 0xef) {
-			units->length = 3;
-		} else if (units->code[0] <= 0xf7) {
-			units->length = 4;
-		} else {
+	uint8_t buffer = 0;
+	fread(&buffer, 1, 1, in);
+	while(!feof(in)) {
+		uint8_t enum_bite = 0;
+		while((buffer & (1 << (7 - enum_bite))) != 0) {
+			enum_bite++;
+		}
+		if (enum_bite == 1) {
+			fread(&buffer, 1, 1, in);
 			continue;
 		}
-
-		for (size_t i = 1; i < units->length; i++) {
-			fread(&units->code[i], 1, 1, in);
-
-			if ((units->code[i] & 0xc0) != 0x80) {
-				fseek(in, -1, SEEK_CUR);
-				continue;
-			}
-			if (i != units->length - 1) {
-				if (feof(in) != 0) {
-					return -1;
+		if (enum_bite == 0) {
+			enum_bite = 1;
+		}
+		if (enum_bite <= MaxCodeLength) {
+			units->length = 0;
+			for (int i = 1; i <= enum_bite; i++) {
+				units->code[i - 1] = buffer;
+				units->length++;
+				if (i == enum_bite) {
+					return 0;
+				}
+				
+				fread(&buffer, 1, 1, in);
+				if ((buffer & 0xC0) != 0x80) {
+					break;
 				}
 			}
 		}
-
-		return 0;
 	}
 
 	return -1;
@@ -98,4 +100,28 @@ int write_code_unit(FILE *out, const CodeUnits *units)
 	fwrite(units->code, units->length, sizeof(units->code), out);
 
 	return 0;
+}
+
+void print_BIT(const CodeUnits *units)
+{
+	int code_128 = 128;
+	int code_127 = 0;
+
+	for (size_t i = 0; i < units->length; ++i) {
+		for (size_t j = 0; j < 8; ++j) {
+
+			code_127 = code_128 & units->code[i];
+
+			if (code_127 == 0) {
+				printf("%d", 0);
+			} else {
+				printf("%d", 1);
+			}
+			code_128 = code_128 >> 1;
+		}
+		code_128 = 128;
+		printf(" ");
+	}
+
+	printf("\n");
 }
